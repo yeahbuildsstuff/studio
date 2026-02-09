@@ -2,36 +2,470 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>InteractiveStudio™ Builder</title>
+  <title>InteractiveStudio™</title>
+
+  <!-- Babylon + Cannon (CDN) -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/cannon.js"></script>
+
   <style>
-    body { background:#111; color:white; font-family:Arial; padding:20px; }
-    button { padding:12px 20px; font-size:16px; cursor:pointer; background:#4caf50; border:none; border-radius:6px; color:white; }
+    body {
+      margin: 0;
+      background: #1e1e1e;
+      color: white;
+      font-family: Arial;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #topbar {
+      display: flex;
+      align-items: center;
+      background: #2d2d2d;
+      padding: 8px;
+      gap: 10px;
+    }
+
+    #topbar button {
+      padding: 6px 12px;
+      background: #3a3a3a;
+      border: 1px solid #555;
+      color: white;
+      cursor: pointer;
+    }
+
+    #topbar button:hover {
+      background: #4a4a4a;
+    }
+
+    #main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    #leftSide {
+      flex: 3;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #viewport {
+      flex: 3;
+      background: #000;
+      position: relative;
+    }
+
+    #viewport canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    #properties {
+      flex: 1;
+      background: #252525;
+      padding: 10px;
+      overflow-y: auto;
+    }
+
+    #rightSide {
+      flex: 1;
+      background: #2a2a2a;
+      padding: 10px;
+      overflow-y: auto;
+    }
+
+    #explorer h3 {
+      margin-top: 0;
+    }
+
+    .folder {
+      margin-bottom: 20px;
+    }
+
+    .folder strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .folderContent div {
+      padding-left: 10px;
+      cursor: pointer;
+      padding-top: 2px;
+      padding-bottom: 2px;
+    }
+
+    .folderContent div.selected {
+      background: #444;
+    }
+
+    input {
+      background: #1e1e1e;
+      border: 1px solid #555;
+      color: white;
+      margin-bottom: 4px;
+      width: 80px;
+    }
+
+    label {
+      font-size: 12px;
+    }
+
+    .propRow {
+      margin-bottom: 6px;
+    }
   </style>
 </head>
 <body>
 
-<h1>InteractiveStudio™ — Client Builder</h1>
-<button onclick="buildClient()">Build & Download Client</button>
+  <!-- TOP BAR -->
+  <div id="topbar">
+    <button id="addPartBtn">Part</button>
+    <button id="addToolBtn">Tool</button>
+
+    <div style="flex:1"></div>
+
+    <button id="exportBtn">Export</button>
+  </div>
+
+  <!-- MAIN AREA -->
+  <div id="main">
+
+    <!-- LEFT SIDE -->
+    <div id="leftSide">
+
+      <!-- VIEWPORT -->
+      <div id="viewport">
+        <canvas id="renderCanvas"></canvas>
+      </div>
+
+      <!-- PROPERTIES -->
+      <div id="properties">
+        <h3>Properties</h3>
+        <div id="propContent"></div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT SIDE -->
+    <div id="rightSide">
+
+      <div id="explorer">
+        <h3>Explorer</h3>
+
+        <div class="folder" id="objectService">
+          <strong>ObjectService</strong>
+          <div class="folderContent"></div>
+        </div>
+
+        <div class="folder" id="toolService">
+          <strong>ToolService</strong>
+          <div class="folderContent"></div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
 
 <script>
+  // ============================================================
+  // DATA MODEL
+  // ============================================================
+  const ObjectService = [];
+  const ToolService = [];
+  let selectedObject = null;
 
-// Load defaultclient.html
-async function loadDefaultClient() {
-  const res = await fetch("StudioAssets/defaultclient.html");
-  return await res.text();
-}
+  // ============================================================
+  // BABYLON SETUP
+  // ============================================================
+  const canvas = document.getElementById("renderCanvas");
+  const engine = new BABYLON.Engine(canvas, true);
+  const scene = new BABYLON.Scene(engine);
 
-// Apply modifications WITHOUT REGEX
-function applyMods(html) {
+  const camera = new BABYLON.FreeCamera("cam",
+    new BABYLON.Vector3(0, 10, -20),
+    scene
+  );
+  camera.attachControl(canvas, true);
+  camera.speed = 0.5;
 
-  // ------------------------------------------------------------
-  // 1. Replace toolDeclarations
-  // ------------------------------------------------------------
-  const toolStart = html.indexOf("const toolDeclarations");
-  const toolOpen = html.indexOf("[", toolStart);
-  const toolClose = html.indexOf("]", toolOpen);
+  const light = new BABYLON.HemisphericLight(
+    "light",
+    new BABYLON.Vector3(0, 1, 0),
+    scene
+  );
 
-  const newTools = `
+  // Simple ground so you see something
+  const ground = BABYLON.MeshBuilder.CreateGround("ground", {
+    width: 100,
+    height: 100
+  }, scene);
+
+  engine.runRenderLoop(() => scene.render());
+  window.addEventListener("resize", () => engine.resize());
+
+  // ============================================================
+  // EXPLORER REFRESH
+  // ============================================================
+  function refreshExplorer() {
+    const objFolder = document.querySelector("#objectService .folderContent");
+    const toolFolder = document.querySelector("#toolService .folderContent");
+
+    objFolder.innerHTML = "";
+    toolFolder.innerHTML = "";
+
+    ObjectService.forEach(obj => {
+      const div = document.createElement("div");
+      div.textContent = obj.name;
+      if (selectedObject === obj) div.classList.add("selected");
+      div.onclick = () => selectObject(obj);
+      objFolder.appendChild(div);
+    });
+
+    ToolService.forEach(tool => {
+      const div = document.createElement("div");
+      div.textContent = tool.name;
+      if (selectedObject === tool) div.classList.add("selected");
+      div.onclick = () => selectObject(tool);
+      toolFolder.appendChild(div);
+    });
+  }
+
+  // ============================================================
+  // PART & TOOL CREATION
+  // ============================================================
+  function addPart() {
+    const part = {
+      id: crypto.randomUUID(),
+      type: "Part",
+      name: "Part",
+      color: { r: 1, g: 1, b: 1 },
+      position: { x: 0, y: 1, z: 0 },
+      size: { x: 2, y: 2, z: 2 },
+      rotation: { x: 0, y: 0, z: 0 },
+      shape: "Block",
+      mesh: null
+    };
+
+    ObjectService.push(part);
+    createMeshForPart(part);
+    refreshExplorer();
+  }
+
+  function addTool() {
+    const tool = {
+      id: crypto.randomUUID(),
+      type: "Tool",
+      name: "NewTool",
+      toolType: "Grab"
+    };
+
+    ToolService.push(tool);
+    refreshExplorer();
+  }
+
+  // ============================================================
+  // MESH CREATION / UPDATE
+  // ============================================================
+  function createMeshForPart(part) {
+    let mesh;
+
+    if (part.shape === "Block") {
+      mesh = BABYLON.MeshBuilder.CreateBox(part.id, {
+        width: part.size.x,
+        height: part.size.y,
+        depth: part.size.z
+      }, scene);
+    } else if (part.shape === "Sphere") {
+      mesh = BABYLON.MeshBuilder.CreateSphere(part.id, {
+        diameter: part.size.x
+      }, scene);
+    } else if (part.shape === "Cylinder") {
+      mesh = BABYLON.MeshBuilder.CreateCylinder(part.id, {
+        height: part.size.y,
+        diameter: part.size.x
+      }, scene);
+    } else {
+      mesh = BABYLON.MeshBuilder.CreateBox(part.id, {
+        width: part.size.x,
+        height: part.size.y,
+        depth: part.size.z
+      }, scene);
+    }
+
+    mesh.position = new BABYLON.Vector3(
+      part.position.x,
+      part.position.y,
+      part.position.z
+    );
+
+    mesh.rotation = new BABYLON.Vector3(
+      part.rotation.x,
+      part.rotation.y,
+      part.rotation.z
+    );
+
+    const mat = new BABYLON.StandardMaterial(part.id + "_mat", scene);
+    mat.diffuseColor = new BABYLON.Color3(part.color.r, part.color.g, part.color.b);
+    mesh.material = mat;
+
+    part.mesh = mesh;
+  }
+
+  function syncPartToMesh(part) {
+    if (!part.mesh) return;
+
+    part.mesh.position.set(
+      part.position.x,
+      part.position.y,
+      part.position.z
+    );
+
+    part.mesh.scaling.set(
+      part.size.x / 2,
+      part.size.y / 2,
+      part.size.z / 2
+    );
+
+    part.mesh.rotation.set(
+      part.rotation.x,
+      part.rotation.y,
+      part.rotation.z
+    );
+
+    part.mesh.material.diffuseColor = new BABYLON.Color3(
+      part.color.r,
+      part.color.g,
+      part.color.b
+    );
+  }
+
+  // ============================================================
+  // SELECTION + PROPERTIES
+  // ============================================================
+  function selectObject(obj) {
+    selectedObject = obj;
+    refreshExplorer();
+    refreshProperties();
+  }
+
+  function refreshProperties() {
+    const panel = document.getElementById("propContent");
+    panel.innerHTML = "";
+
+    if (!selectedObject) return;
+
+    if (selectedObject.type === "Tool") {
+      panel.appendChild(makeInputRow("Name", selectedObject.name, v => {
+        selectedObject.name = v;
+        refreshExplorer();
+      }));
+
+      panel.appendChild(makeInputRow("Type", selectedObject.toolType, v => {
+        selectedObject.toolType = v;
+      }));
+    }
+
+    if (selectedObject.type === "Part") {
+      panel.appendChild(makeInputRow("Name", selectedObject.name, v => {
+        selectedObject.name = v;
+        refreshExplorer();
+      }));
+
+      panel.appendChild(makeInputRow("Shape", selectedObject.shape, v => {
+        selectedObject.shape = v;
+        if (selectedObject.mesh) selectedObject.mesh.dispose();
+        createMeshForPart(selectedObject);
+      }));
+
+      panel.appendChild(makeInputRow("Color R", selectedObject.color.r, v => {
+        selectedObject.color.r = parseFloat(v) || 0;
+        syncPartToMesh(selectedObject);
+      }));
+      panel.appendChild(makeInputRow("Color G", selectedObject.color.g, v => {
+        selectedObject.color.g = parseFloat(v) || 0;
+        syncPartToMesh(selectedObject);
+      }));
+      panel.appendChild(makeInputRow("Color B", selectedObject.color.b, v => {
+        selectedObject.color.b = parseFloat(v) || 0;
+        syncPartToMesh(selectedObject);
+      }));
+
+      panel.appendChild(makeInputRow("Pos X", selectedObject.position.x, v => {
+        selectedObject.position.x = parseFloat(v) || 0;
+        syncPartToMesh(selectedObject);
+      }));
+      panel.appendChild(makeInputRow("Pos Y", selectedObject.position.y, v => {
+        selectedObject.position.y = parseFloat(v) || 0;
+        syncPartToMesh(selectedObject);
+      }));
+      panel.appendChild(makeInputRow("Pos Z", selectedObject.position.z, v => {
+        selectedObject.position.z = parseFloat(v) || 0;
+        syncPartToMesh(selectedObject);
+      }));
+
+      panel.appendChild(makeInputRow("Size X", selectedObject.size.x, v => {
+        selectedObject.size.x = parseFloat(v) || 1;
+        syncPartToMesh(selectedObject);
+      }));
+      panel.appendChild(makeInputRow("Size Y", selectedObject.size.y, v => {
+        selectedObject.size.y = parseFloat(v) || 1;
+        syncPartToMesh(selectedObject);
+      }));
+      panel.appendChild(makeInputRow("Size Z", selectedObject.size.z, v => {
+        selectedObject.size.z = parseFloat(v) || 1;
+        syncPartToMesh(selectedObject);
+      }));
+
+      panel.appendChild(makeInputRow("Rot X", selectedObject.rotation.x, v => {
+        selectedObject.rotation.x = parseFloat(v) || 0;
+        syncPartToMesh(selectedObject);
+      }));
+      panel.appendChild(makeInputRow("Rot Y", selectedObject.rotation.y, v => {
+        selectedObject.rotation.y = parseFloat(v) || 0;
+        syncPartToMesh(selectedObject);
+      }));
+      panel.appendChild(makeInputRow("Rot Z", selectedObject.rotation.z, v => {
+        selectedObject.rotation.z = parseFloat(v) || 0;
+        syncPartToMesh(selectedObject);
+      }));
+    }
+  }
+
+  function makeInputRow(labelText, value, onChange) {
+    const row = document.createElement("div");
+    row.className = "propRow";
+
+    const label = document.createElement("label");
+    label.textContent = labelText + ": ";
+
+    const input = document.createElement("input");
+    input.value = value;
+    input.onchange = () => onChange(input.value);
+
+    row.appendChild(label);
+    row.appendChild(input);
+    return row;
+  }
+
+  // ============================================================
+  // EXPORTER (same idea as your working one)
+  // ============================================================
+  async function loadDefaultClient() {
+    const res = await fetch("StudioAssets/defaultclient.html");
+    return await res.text();
+  }
+
+  function applyExporterMods(html) {
+    // 1) toolDeclarations injection (static for now, like before)
+    const toolStart = html.indexOf("const toolDeclarations");
+    const toolOpen = html.indexOf("[", toolStart);
+    const toolClose = html.indexOf("]", toolOpen);
+
+    const newTools = `
   { type: "Grab",      name: "Grab" },
   { type: "Copy",      name: "Clone" },
   { type: "Delete",    name: "Delete" },
@@ -39,30 +473,25 @@ function applyMods(html) {
   { type: "Bomb",      name: "Explosives" }
 `;
 
-  html =
-    html.substring(0, toolOpen + 1) +
-    newTools +
-    html.substring(toolClose);
+    html =
+      html.substring(0, toolOpen + 1) +
+      newTools +
+      html.substring(toolClose);
 
-  // ------------------------------------------------------------
-  // 2. Replace ENTIRE PLACE_CODE(scene) function
-  // ------------------------------------------------------------
-  const placeStart = html.indexOf("function PLACE_CODE(scene)");
-  const braceOpen = html.indexOf("{", placeStart);
+    // 2) Replace entire PLACE_CODE with baseplate + original hook
+    const placeStart = html.indexOf("function PLACE_CODE(scene)");
+    const braceOpen = html.indexOf("{", placeStart);
 
-  // Find matching closing brace
-  let depth = 1;
-  let i = braceOpen + 1;
+    let depth = 1;
+    let i = braceOpen + 1;
+    while (i < html.length && depth > 0) {
+      if (html[i] === "{") depth++;
+      if (html[i] === "}") depth--;
+      i++;
+    }
+    const braceClose = i;
 
-  while (i < html.length && depth > 0) {
-    if (html[i] === "{") depth++;
-    if (html[i] === "}") depth--;
-    i++;
-  }
-
-  const braceClose = i; // end of function
-
-  const newFunction = `
+    const newFunction = `
 function PLACE_CODE(scene) {
 
   // BASEPLATE
@@ -87,38 +516,46 @@ function PLACE_CODE(scene) {
   baseBody.position.set(0, -10, 0);
   world.addBody(baseBody);
 
-  // ORIGINAL TEST BRICK
+  // ORIGINAL TEST BRICK HOOK
   if (makeDraggableRef) {
     makeDraggableRef(testBrick);
   }
 }
 `;
 
-  html =
-    html.substring(0, placeStart) +
-    newFunction +
-    html.substring(braceClose);
+    html =
+      html.substring(0, placeStart) +
+      newFunction +
+      html.substring(braceClose);
 
-  return html;
-}
+    return html;
+  }
 
-// Download file
-function download(html) {
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "InteractiveClient.html";
-  a.click();
-  URL.revokeObjectURL(url);
-}
+  function downloadClient(html) {
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "InteractiveClient.html";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
-// Main
-async function buildClient() {
-  let html = await loadDefaultClient();
-  html = applyMods(html);
-  download(html);
-}
+  async function exportClient() {
+    let html = await loadDefaultClient();
+    html = applyExporterMods(html);
+    downloadClient(html);
+  }
+
+  // ============================================================
+  // HOOK UP BUTTONS
+  // ============================================================
+  document.getElementById("addPartBtn").onclick = addPart;
+  document.getElementById("addToolBtn").onclick = addTool;
+  document.getElementById("exportBtn").onclick = exportClient;
+
+  // Initial refresh
+  refreshExplorer();
 
 </script>
 
