@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>InteractiveStudio™ Builder</title>
+  <meta charset="UTF-8" />
+  <style>
+    body {
+      background:#111;
+      color:white;
+      font-family:Arial, sans-serif;
+      padding:20px;
+    }
+    button {
+      padding:12px 20px;
+      font-size:16px;
+      cursor:pointer;
+      background:#4caf50;
+      border:none;
+      border-radius:6px;
+      color:white;
+    }
+  </style>
+</head>
+<body>
+
+<h1>InteractiveStudio™ — Client Builder</h1>
+<p>Click the button below to generate a modified client with tools + baseplate.</p>
+
+<button onclick="buildClient()">Build & Download Client</button>
+
+<script>
+
+// ============================================================
+// LOAD DEFAULT CLIENT
+// ============================================================
+async function loadDefaultClient() {
+  const res = await fetch("StudioAssets/defaultclient.html");
+  return await res.text();
+}
+
+// ============================================================
+// APPLY MODIFICATIONS (NO REGEX — SAFE VERSION)
+// ============================================================
+function applyStudioModifications(html) {
+
+  // ------------------------------------------------------------
+  // 1. Inject tool declarations
+  // ------------------------------------------------------------
+  html = html.replace(
+    "const toolDeclarations = [",
+    `const toolDeclarations = [
+      { type: "Grab",      name: "Grab" },
+      { type: "Copy",      name: "Clone" },
+      { type: "Delete",    name: "Delete" },
+      { type: "SlingShot", name: "SlingShot" },
+      { type: "Bomb",      name: "Explosives" },`
+  );
+
+  // ------------------------------------------------------------
+  // 2. Inject baseplate into PLACE_CODE(scene)
+  // ------------------------------------------------------------
+
+  const start = html.indexOf("function PLACE_CODE(scene)");
+  const openBrace = html.indexOf("{", start);
+  const closeBrace = html.indexOf("}", openBrace);
+
+  const originalInside = html.substring(openBrace + 1, closeBrace);
+
+  const injectedInside = `
+      // ============================================================
+      // BASEPLATE (64 x 0.5 x 64)
+      // ============================================================
+      const baseplate = BABYLON.MeshBuilder.CreateBox("Baseplate", {
+        width: 64,
+        height: 0.5,
+        depth: 64
+      }, scene);
+
+      baseplate.position.set(0, -10, 0);
+
+      const baseMat = new BABYLON.StandardMaterial("baseMat", scene);
+      baseMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+      baseplate.material = baseMat;
+
+      const baseShape = new CANNON.Box(new CANNON.Vec3(32, 0.25, 32));
+      const baseBody = new CANNON.Body({
+        mass: 0,
+        shape: baseShape,
+        material: groundMatPhys
+      });
+      baseBody.position.set(0, -10, 0);
+      world.addBody(baseBody);
+
+      // ============================================================
+      // ORIGINAL CONTENT
+      // ============================================================
+      ${originalInside}
+  `;
+
+  html =
+    html.substring(0, openBrace + 1) +
+    injectedInside +
+    html.substring(closeBrace);
+
+  return html;
+}
+
+// ============================================================
+// DOWNLOAD MODIFIED CLIENT
+// ============================================================
+function downloadModifiedClient(html) {
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "InteractiveClient.html";
+  a.click();
+
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// MAIN BUILD FUNCTION
+// ============================================================
+async function buildClient() {
+  let html = await loadDefaultClient();
+  html = applyStudioModifications(html);
+  downloadModifiedClient(html);
+}
+
+</script>
+
+</body>
+</html>
