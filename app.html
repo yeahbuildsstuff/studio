@@ -21,28 +21,28 @@ async function loadDefaultClient() {
   return await res.text();
 }
 
-// Apply modifications
+// Apply modifications WITHOUT REGEX
 function applyMods(html) {
 
   // ------------------------------------------------------------
   // 1. Replace toolDeclarations
   // ------------------------------------------------------------
-  const toolBlock = `const toolDeclarations = [
+  const toolStart = html.indexOf("const toolDeclarations");
+  const toolOpen = html.indexOf("[", toolStart);
+  const toolClose = html.indexOf("]", toolOpen);
+
+  const newTools = `
   { type: "Grab",      name: "Grab" },
   { type: "Copy",      name: "Clone" },
   { type: "Delete",    name: "Delete" },
   { type: "SlingShot", name: "SlingShot" },
   { type: "Bomb",      name: "Explosives" }
-];`;
+`;
 
-  html = html.replace(
-    /const toolDeclarations\s*=\s*
-
-\[[\s\S]*?\]
-
-;/,
-    toolBlock
-  );
+  html =
+    html.substring(0, toolOpen + 1) +
+    newTools +
+    html.substring(toolClose);
 
   // ------------------------------------------------------------
   // 2. Replace PLACE_CODE(scene)
@@ -52,8 +52,6 @@ function applyMods(html) {
   const braceClose = html.indexOf("}", braceOpen);
 
   const newPlaceCode = `
-function PLACE_CODE(scene) {
-
   // BASEPLATE
   const baseplate = BABYLON.MeshBuilder.CreateBox("Baseplate", {
     width: 64,
@@ -80,13 +78,12 @@ function PLACE_CODE(scene) {
   if (makeDraggableRef) {
     makeDraggableRef(testBrick);
   }
-}
 `;
 
   html =
-    html.substring(0, placeStart) +
+    html.substring(0, braceOpen + 1) +
     newPlaceCode +
-    html.substring(braceClose + 1);
+    html.substring(braceClose);
 
   return html;
 }
