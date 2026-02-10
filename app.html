@@ -170,7 +170,9 @@ mesh.position=new BABYLON.Vector3(part.position.x,part.position.y,part.position.
 mesh.rotation.x+=part.rotation.x;mesh.rotation.y+=part.rotation.y;mesh.rotation.z+=part.rotation.z;
 const mat=new BABYLON.StandardMaterial(part.id+"_mat",scene);
 mat.diffuseColor=new BABYLON.Color3(part.color.r,part.color.g,part.color.b);
-mesh.material=mat;part.mesh=mesh;
+mesh.material=mat;
+mesh.isPickable=true;
+part.mesh=mesh;
 }
 
 //==============================================================
@@ -240,7 +242,7 @@ tabE.onclick=showExplorerTab;tabP.onclick=showPropertiesTab;
 // EXPORTER
 //==============================================================
 async function loadDefaultClient(){let r=await fetch("StudioAssets/defaultclient.html");return await r.text();}
-function genTools(){return ToolService.map(t=>`  { type: "${t.toolType}", name: "${t.name}" }`).join(",\n");}
+function genTools(){if(ToolService.length===0)return"";return ToolService.map(t=>`  { type: "${t.toolType}", name: "${t.name}" }`).join(",\n");}
 function genPLACE(){
 let out=`function PLACE_CODE(scene){\n\n`;
 ObjectService.forEach((p,i)=>{
@@ -259,6 +261,7 @@ out+=`${m}.rotation.set(${p.rotation.x},${p.rotation.y},${p.rotation.z});\n`;
 out+=`const ${mat}=new BABYLON.StandardMaterial("${mat}",scene);\n`;
 out+=`${mat}.diffuseColor=new BABYLON.Color3(${p.color.r},${p.color.g},${p.color.b});\n`;
 out+=`${m}.material=${mat};\n`;
+out+=`${m}.isPickable=true;\n`;
 out+=`const shape_${i}=new CANNON.Box(new CANNON.Vec3(${p.size.x/2},${p.size.y/2},${p.size.z/2}));\n`;
 out+=`const body_${i}=new CANNON.Body({mass:${p.anchored?0:1},shape:shape_${i},material:groundMatPhys});\n`;
 out+=`body_${i}.position.set(${p.position.x},${p.position.y},${p.position.z});\n`;
@@ -295,10 +298,6 @@ async function exportClient(){let h=await loadDefaultClient();h=applyMods(h);dow
 document.getElementById("addPartBtn").onclick=addPart;
 document.getElementById("addToolBtn").onclick=addTool;
 document.getElementById("exportBtn").onclick=exportClient;
-createBaseplate();
-refreshExplorer();
-refreshProperties();
-
+createBaseplate();refreshExplorer();refreshProperties();
 </script>
-</body>
-</html>
+</body></html>
