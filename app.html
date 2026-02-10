@@ -132,6 +132,13 @@ function PLACE_CODE(scene) {
   base.draggable = false;
   EditorParts.push({ mesh: base });
 
+  // Physics for baseplate
+  const baseShape = new CANNON.Box(new CANNON.Vec3(32, 0.5, 32));
+  const baseBody = new CANNON.Body({ mass: 0, material: groundMatPhys });
+  baseBody.addShape(baseShape);
+  baseBody.position.set(base.position.x, base.position.y, base.position.z);
+  world.addBody(baseBody);
+
   // Example draggable brick
   const testBrick = BABYLON.MeshBuilder.CreateBox("TestBrick", {
     width: 4, height: 2, depth: 4
@@ -365,7 +372,6 @@ function createScene() {
       document.exitFullscreen();
     }
   };
-
   // Insert Part: spawn in front of player, make draggable
   document.getElementById("insertPartBtn").onclick = () => {
     const p = sounds.ui_click;
@@ -401,7 +407,7 @@ function createScene() {
     refreshExplorer();
   };
 
-  // Export: JSON layout of parts + tools
+  // Export: full HTML client
   document.getElementById("exportBtn").onclick = () => {
     const p = sounds.ui_click;
     if (p && p.loaded) try { p.start(); } catch(e) {}
@@ -423,16 +429,777 @@ function createScene() {
       tools: EditorTools
     };
 
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const exportedHtml =
+`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Game</title>
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+  <style>
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; }
+    #renderCanvas { width:100%; height:100%; display:block; }
+  </style>
+</head>
+<body>
+<canvas id="renderCanvas"></canvas>
+<script>
+const EXPORTED_DATA = ${JSON.stringify(data)};
+
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true);
+
+const world = new CANNON.World();
+world.gravity.set(0, -157.12, 0);
+world.broadphase = new CANNON.NaiveBroadphase();
+world.solver.iterations = 10;
+
+const groundMatPhys = new CANNON.Material("groundMatPhys");
+const playerMatPhys = new CANNON.Material("playerMatPhys");
+world.addContactMaterial(new CANNON.ContactMaterial(
+  groundMatPhys,
+  playerMatPhys,
+  { friction: 1.0, restitution: 0.0 }
+));
+
+let makeDraggableRef = null;
+
+function createScene() {
+  const scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color3(1,1,1);
+
+  const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 2000 }, scene);
+  const skyboxMaterial = new BABYLON.StandardMaterial("skyBoxMat", scene);
+  skyboxMaterial.backFaceCulling = false;
+  skyboxMaterial.disableLighting = true;
+  skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(
+    "https://raw.githubusercontent.com/yeahbuildsstuff/GameAssetServiceRepo/main/null_plainsky512/null_plainsky512",
+    scene,
+    ["_rt.jpg","_up.jpg","_ft.jpg","_lf.jpg","_dn.jpg","_bk.jpg"]
+  );
+  skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+  skybox.material = skyboxMaterial;
+  skybox.infiniteDistance = true;
+
+  const spriteManagerSun = new BABYLON.SpriteManager(
+    "sunManager",
+    "https://raw.githubusercontent.com/yeahbuildsstuff/GameAssetServiceRepo/main/sun.png",
+    1,
+    { width: 512, height: 512 },
+    scene
+  );
+  spriteManagerSun.renderingGroupId = 0;
+
+  const sunSprite = new BABYLON.Sprite("sun", spriteManagerSun);
+  sunSprite.size = 160;
+  sunSprite.position = new BABYLON.Vector3(200, 100, 200);
+  sunSprite.isPickable = false;
+  sunSprite.renderingGroupId = 0;
+
+  const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-1,-1,-1), scene);
+  sun.position = new BABYLON.Vector3(10,10,-10);
+  sun.intensity = 0.52;
+
+  const ambient = new BABYLON.HemisphericLight("ambient", new BABYLON.Vector3(0,1,0), scene);
+  ambient.diffuse = new BABYLON.Color3(210/255,210/255,210/255);
+  ambient.specular = new BABYLON.Color3(0,0,0);
+  ambient.groundColor = new BABYLON.Color3(210/255,210/255,210/255);
+  ambient.intensity = 0.6;
+
+  const rig = new BABYLON.TransformNode("rig", scene);
+  rig.position.y = 5;
+  const spawnPoint = rig.position.clone();
+
+  const model = new BABYLON.TransformNode("model", scene);
+  model.parent = rig;
+
+  let id = 0;
+  function part(name, w, h, d, y, x = 0, color) {
+    const p = BABYLON.MeshBuilder.CreateBox(name + "_" + (id++), {
+      width:w, height:h, depth:d
+    }, scene);
+    p.position.y = y;
+    p.position.x = x;
+    const mat = new BABYLON.StandardMaterial(name + "_mat", scene);
+    mat.diffuseColor = color;
+    mat.specularColor = new BABYLON.Color3(0,0,0);
+    p.material = mat;
+    p.parent = model;
+    p.draggable = false;
+    return p;
+  }
+
+  const brightYellow      = new BABYLON.Color3(245/255,205/255,48/255);
+  const pastelBlue        = new BABYLON.Color3(128/255,187/255,219/255);
+  const brightYellowGreen = new BABYLON.Color3(164/255,189/255,71/255);
+
+  part("torso", 2,2,1, 2, 0, pastelBlue);
+  part("leftLeg", 1,2,1, 0,-0.5, brightYellowGreen);
+  part("rightLeg",1,2,1, 0, 0.5, brightYellowGreen);
+  part("leftArm", 1,2,1, 2,-1.5, brightYellow);
+  part("rightArm",1,2,1, 2, 1.5, brightYellow);
+
+  BABYLON.SceneLoader.ImportMesh(
+    "",
+    "https://raw.githubusercontent.com/yeahbuildsstuff/GameAssetServiceRepo/main/",
+    "head.obj",
+    scene,
+    function(meshes) {
+      const headInner = meshes[0];
+      headInner.scaling = new BABYLON.Vector3(1,1,1);
+      headInner.rotation = new BABYLON.Vector3(0,Math.PI,0);
+      headInner.position = new BABYLON.Vector3(0,3.5,0);
+      headInner.parent = model;
+
+      const innerMat = new BABYLON.StandardMaterial("innerMat", scene);
+      innerMat.diffuseColor = brightYellow;
+      innerMat.specularColor = new BABYLON.Color3(0,0,0);
+      headInner.material = innerMat;
+
+      const headOuter = headInner.clone("headOuter");
+      headOuter.parent = model;
+      headOuter.scaling = new BABYLON.Vector3(1.002,1.002,1.002);
+
+      const faceMat = new BABYLON.StandardMaterial("faceMat", scene);
+      const faceTex = new BABYLON.Texture(
+        "https://raw.githubusercontent.com/yeahbuildsstuff/GameAssetServiceRepo/main/defaultface.png",
+        scene
+      );
+      faceTex.hasAlpha = true;
+      faceMat.diffuseTexture = faceTex;
+      faceMat.opacityTexture = faceTex;
+      faceMat.emissiveColor = new BABYLON.Color3(1,1,1);
+      faceMat.specularColor = new BABYLON.Color3(0,0,0);
+      faceMat.backFaceCulling = false;
+      headOuter.material = faceMat;
+    }
+  );
+
+  const SFX_BASE = "https://raw.githubusercontent.com/yeahbuildsstuff/GameAssetServiceRepo/main/sounds/";
+  const sounds = {};
+  function loadSound(name, file, options={}) {
+    const player = new Tone.Player(SFX_BASE + file).toDestination();
+    if (options.loop) player.loop = true;
+    if (options.volumeDb !== undefined) player.volume.value = options.volumeDb;
+    player._playing = false;
+    sounds[name] = player;
+  }
+  let audioStarted = false;
+  let bombTickInterval = null;
+  function startBombTick() {
+    if (bombTickInterval) return;
+    bombTickInterval = setInterval(() => {
+      const p = sounds.bomb_tick;
+      if (p && p.loaded) { try { p.start(); } catch(e) {} }
+    }, 500);
+  }
+  function stopBombTick() {
+    if (!bombTickInterval) return;
+    clearInterval(bombTickInterval);
+    bombTickInterval = null;
+  }
+  function ensureAudioStarted() {
+    if (!audioStarted) {
+      Tone.start();
+      audioStarted = true;
+      loadSound("footsteps","footsteps.mp3",{loop:true,volumeDb:-5});
+      loadSound("slingshot","Rubberbandslingshot.wav",{volumeDb:-3});
+      loadSound("tool_ping","electronicpingshort.wav",{volumeDb:-6});
+      loadSound("explosion","Shoulderfiredrocket.wav",{volumeDb:-2});
+      loadSound("ouch","KidsayingOuch.wav",{volumeDb:-4});
+      loadSound("snap","snap.wav",{volumeDb:-4});
+      loadSound("bomb_tick","clickfast.wav",{volumeDb:-10});
+    }
+  }
+  window.addEventListener("pointerdown", ensureAudioStarted, { once:true });
+  window.addEventListener("keydown", ensureAudioStarted, { once:true });
+
+  const capsuleRadius = 0.6;
+  const capsuleHeight = 8.0;
+  const capsuleOffset = 1.0;
+  const cylHeight = capsuleHeight - 2 * capsuleRadius;
+
+  const sphereTop = new CANNON.Sphere(capsuleRadius);
+  const sphereBottom = new CANNON.Sphere(capsuleRadius);
+  const cylinder = new CANNON.Cylinder(capsuleRadius, capsuleRadius, cylHeight, 8);
+
+  const playerBody = new CANNON.Body({
+    mass: 1,
+    material: playerMatPhys,
+    linearDamping: 0.9,
+    angularDamping: 1.0
+  });
+
+  playerBody.addShape(sphereTop, new CANNON.Vec3(0, cylHeight / 2, 0));
+  playerBody.addShape(sphereBottom, new CANNON.Vec3(0, -cylHeight / 2, 0));
+  const q = new CANNON.Quaternion();
+  q.setFromEuler(Math.PI / 2, 0, 0);
+  playerBody.addShape(cylinder, new CANNON.Vec3(0, 0, 0), q);
+
+  playerBody.position.set(
+    rig.position.x,
+    rig.position.y + capsuleHeight / 2 + capsuleOffset,
+    rig.position.z
+  );
+  playerBody.fixedRotation = true;
+  playerBody.updateMassProperties();
+  world.addBody(playerBody);
+
+  let camYaw = Math.PI / 2;
+  let camPitch = Math.PI / 4;
+  let camDistance = 15 / 1.4;
+
+  const camera = new BABYLON.FreeCamera("cam", new BABYLON.Vector3(0,5,-10), scene);
+  camera.minZ = 0.1;
+
+  let isMouseDown = false;
+  canvas.addEventListener("pointerdown", () => isMouseDown = true);
+  canvas.addEventListener("pointerup", () => isMouseDown = false);
+  canvas.addEventListener("pointermove", (e) => {
+    if (!isMouseDown) return;
+    camYaw += e.movementX * 0.005;
+    camPitch += e.movementY * 0.005;
+  });
+
+  const input = { forward:0, right:0 };
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "w") input.forward = -1;
+    if (e.key === "s") input.forward = 1;
+    if (e.key === "a") input.right = 1;
+    if (e.key === "d") input.right = -1;
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key === "w" || e.key === "s") input.forward = 0;
+    if (e.key === "a" || e.key === "d") input.right = 0;
+  });
+
+  const walkSpeed = 0.24;
+  let camPos = camera.position.clone();
+  let camTarget = new BABYLON.Vector3();
+  const followTime = 0.125;
+
+  const toolDeclarations = [
+    { type: "Grab",      name: "Grab" },
+    { type: "Copy",      name: "Clone" },
+    { type: "Delete",    name: "Delete" },
+    { type: "SlingShot", name: "SlingShot" },
+    { type: "Bomb",      name: "Explosives" }
+  ];
+  const ToolBehaviors = {};
+  const toolBar = document.createElement("div");
+  toolBar.style.position = "absolute";
+  toolBar.style.bottom = "10px";
+  toolBar.style.left = "10px";
+  toolBar.style.display = "flex";
+  toolBar.style.gap = "0px";
+  toolBar.style.zIndex = "50";
+  document.body.appendChild(toolBar);
+
+  let selectedToolIndex = -1;
+  const toolButtons = [];
+  function createToolButton(tool, index) {
+    const btn = document.createElement("div");
+    btn.style.width = "100px";
+    btn.style.height = "100px";
+    btn.style.background = "rgba(165,165,165,0.4)";
+    btn.style.border = "none";
+    btn.style.margin = "0";
+    btn.style.fontFamily = "Arimo, sans-serif";
+    btn.style.fontStyle = "italic";
+    btn.style.fontWeight = "bold";
+    btn.style.color = "white";
+    btn.style.display = "flex";
+    btn.style.flexDirection = "column";
+    btn.style.justifyContent = "center";
+    btn.style.alignItems = "center";
+    btn.style.position = "relative";
+    btn.style.cursor = "pointer";
+    btn.style.userSelect = "none";
+
+    const label = document.createElement("div");
+    label.innerText = tool.name;
+    label.style.fontSize = "18px";
+    label.style.textShadow = "0 0 2px black";
+    btn.appendChild(label);
+
+    const num = document.createElement("div");
+    num.innerText = (index + 1).toString();
+    num.style.position = "absolute";
+    num.style.bottom = "4px";
+    num.style.left = "6px";
+    num.style.fontSize = "16px";
+    num.style.textShadow = "0 0 2px black";
+    btn.appendChild(num);
+
+    btn.onclick = () => {
+      const ping = sounds.tool_ping;
+      if (selectedToolIndex === index) {
+        selectedToolIndex = -1;
+        updateToolHighlight();
+        if (ping && ping.loaded) try { ping.start(); } catch(e) {}
+      } else {
+        selectTool(index);
+      }
+    };
+
+    toolBar.appendChild(btn);
+    return btn;
+  }
+
+  toolDeclarations.forEach((tool, i) => {
+    toolButtons.push(createToolButton(tool, i));
+  });
+
+  function updateToolHighlight() {
+    toolButtons.forEach((btn, i) => {
+      btn.style.outline = (i === selectedToolIndex)
+        ? "3px solid yellow"
+        : "none";
+    });
+  }
+  function selectTool(i) {
+    selectedToolIndex = i;
+    updateToolHighlight();
+    const ping = sounds.tool_ping;
+    if (ping && ping.loaded) try { ping.start(); } catch(e) {}
+  }
+  updateToolHighlight();
+
+  window.addEventListener("keydown", e => {
+    const n = parseInt(e.key);
+    if (!isNaN(n) && n >= 1 && n <= toolButtons.length) {
+      const index = n - 1;
+      const ping = sounds.tool_ping;
+      if (selectedToolIndex === index) {
+        selectedToolIndex = -1;
+        updateToolHighlight();
+        if (ping && ping.loaded) try { ping.start(); } catch(e) {}
+      } else {
+        selectTool(index);
+      }
+    }
+  });
+
+  function currentToolType() {
+    if (selectedToolIndex === -1) return null;
+    return toolDeclarations[selectedToolIndex].type;
+  }
+  function getMouseHit() {
+    const pick = scene.pick(scene.pointerX, scene.pointerY);
+    return pick && pick.hit ? pick : null;
+  }
+
+  const highlight = new BABYLON.HighlightLayer("hl", scene);
+
+  function makeDraggable(mesh) {
+    mesh.draggable = true;
+    const bbox = mesh.getBoundingInfo().boundingBox.extendSize;
+    const shape = new CANNON.Box(new CANNON.Vec3(bbox.x, bbox.y, bbox.z));
+    const body = new CANNON.Body({
+      mass: 1,
+      material: groundMatPhys
+    });
+    body.addShape(shape);
+    body.position.set(mesh.position.x, mesh.position.y, mesh.position.z);
+    world.addBody(body);
+    mesh.physicsBody = body;
+  }
+  makeDraggableRef = makeDraggable;
+
+  function alignValue(v) {
+    return v >= 0 ? Math.floor(v) : Math.ceil(v);
+  }
+  function alignVector3(vec) {
+    return new BABYLON.Vector3(
+      alignValue(vec.x),
+      alignValue(vec.y),
+      alignValue(vec.z)
+    );
+  }
+
+  const projectiles = [];
+  function getHeadForward() {
+    const m = model.getWorldMatrix();
+    const forward = BABYLON.Vector3.TransformNormal(
+      new BABYLON.Vector3(0,0,-1),
+      m
+    );
+    forward.y = 0;
+    return forward.normalize();
+  }
+
+  function spawnProjectile(opts) {
+    const forward = getHeadForward();
+    const fireDir = forward.scale(-1);
+    const startPos = rig.position
+      .add(new BABYLON.Vector3(0,3,0))
+      .add(fireDir.scale(2));
+
+    const mesh = BABYLON.MeshBuilder.CreateSphere("proj", { diameter: opts.radius * 2 }, scene);
+    mesh.position.copyFrom(startPos);
+    const mat = new BABYLON.StandardMaterial("projMat", scene);
+    mat.diffuseColor = opts.color;
+    mat.specularColor = new BABYLON.Color3(0,0,0);
+    mesh.material = mat;
+
+    const body = new CANNON.Body({
+      mass: 1,
+      material: groundMatPhys
+    });
+    body.addShape(new CANNON.Sphere(opts.radius));
+    body.position.set(startPos.x, startPos.y, startPos.z);
+
+    const vel = fireDir.scale(opts.speed);
+    body.velocity.set(vel.x, vel.y, vel.z);
+
+    world.addBody(body);
+
+    projectiles.push({
+      mesh,
+      body,
+      life: opts.life,
+      isBomb: opts.isBomb
+    });
+  }
+
+  function explodeAt(position, radius, force) {
+    const playerDist = BABYLON.Vector3.Distance(
+      new BABYLON.Vector3(playerBody.position.x, playerBody.position.y, playerBody.position.z),
+      position
+    );
+    if (playerDist <= radius) {
+      const ouch = sounds.ouch;
+      if (ouch && ouch.loaded) try { ouch.start(); } catch(e) {}
+      playerBody.position.set(spawnPoint.x, spawnPoint.y, spawnPoint.z);
+      playerBody.velocity.set(0,0,0);
+      rig.position.copyFrom(spawnPoint);
+      model.rotation.y = 0;
+      camYaw = Math.PI / 2;
+    }
+
+    scene.meshes.forEach(m => {
+      if (!m.draggable) return;
+      const diff = m.position.subtract(position);
+      const dist = diff.length();
+      if (dist > radius || dist === 0) return;
+
+      if (!m.physicsBody) {
+        const bbox = m.getBoundingInfo().boundingBox.extendSize;
+        const shape = new CANNON.Box(new CANNON.Vec3(bbox.x, bbox.y, bbox.z));
+        const body = new CANNON.Body({
+          mass: 1,
+          material: groundMatPhys
+        });
+        body.addShape(shape);
+        body.position.set(m.position.x, m.position.y, m.position.z);
+        world.addBody(body);
+        m.physicsBody = body;
+      }
+
+      const dir = diff.normalize();
+      const strength = (radius - dist) / radius * force;
+      m.physicsBody.applyImpulse(
+        new CANNON.Vec3(dir.x * strength, dir.y * strength, dir.z * strength),
+        new CANNON.Vec3(0,0,0)
+      );
+    });
+
+    const explosion = BABYLON.MeshBuilder.CreateSphere("explosion", { diameter: radius * 2 }, scene);
+    const mat = new BABYLON.StandardMaterial("explosionMat", scene);
+    mat.emissiveColor = new BABYLON.Color3(1,0,0);
+    mat.diffuseColor  = new BABYLON.Color3(1,0,0);
+    mat.alpha = 1.0;
+    explosion.material = mat;
+    explosion.position.copyFrom(position);
+
+    const p = sounds.explosion;
+    if (p && p.loaded) { try { p.start(); } catch(e) {} }
+    setTimeout(() => explosion.dispose(), 300);
+  }
+
+  let draggedMesh = null;
+  let dragOffset = null;
+
+  ToolBehaviors.Grab = {
+    pointerDown(pick) {
+      if (!pick || !pick.pickedMesh || !pick.pickedMesh.draggable) return;
+      draggedMesh = pick.pickedMesh;
+      dragOffset = draggedMesh.position.subtract(pick.pickedPoint);
+      highlight.addMesh(draggedMesh, BABYLON.Color3.Yellow());
+    },
+    pointerMove(pick) {
+      if (!draggedMesh || !pick) return;
+      const pos = pick.pickedPoint.add(dragOffset);
+      draggedMesh.position.copyFrom(alignVector3(pos));
+      if (draggedMesh.physicsBody) {
+        draggedMesh.physicsBody.position.set(
+          draggedMesh.position.x,
+          draggedMesh.position.y,
+          draggedMesh.position.z
+        );
+        draggedMesh.physicsBody.velocity.set(0,0,0);
+      }
+    },
+    pointerUp() {
+      if (draggedMesh) {
+        highlight.removeMesh(draggedMesh);
+        draggedMesh = null;
+      }
+    }
+  };
+
+  ToolBehaviors.Copy = {
+    pointerDown(pick) {
+      if (!pick || !pick.pickedMesh || !pick.pickedMesh.draggable) return;
+      const ping = sounds.tool_ping;
+      if (ping && ping.loaded) try { ping.start(); } catch(e) {}
+      const original = pick.pickedMesh;
+      const clone = original.clone(original.name + "_clone");
+      clone.position.copyFrom(original.position);
+      makeDraggable(clone);
+      draggedMesh = clone;
+      dragOffset = new BABYLON.Vector3(0,0,0);
+      highlight.addMesh(draggedMesh, BABYLON.Color3.Yellow());
+    },
+    pointerMove(pick) {
+      if (!draggedMesh || !pick) return;
+      draggedMesh.position.copyFrom(alignVector3(pick.pickedPoint));
+      if (draggedMesh.physicsBody) {
+        draggedMesh.physicsBody.position.set(
+          draggedMesh.position.x,
+          draggedMesh.position.y,
+          draggedMesh.position.z
+        );
+        draggedMesh.physicsBody.velocity.set(0,0,0);
+      }
+    },
+    pointerUp() {
+      if (draggedMesh) {
+        highlight.removeMesh(draggedMesh);
+        draggedMesh = null;
+      }
+    }
+  };
+
+  ToolBehaviors.Delete = {
+    pointerDown(pick) {
+      if (!pick || !pick.pickedMesh || !pick.pickedMesh.draggable) return;
+      const snap = sounds.snap;
+      if (snap && snap.loaded) try { snap.start(); } catch(e) {}
+      highlight.removeMesh(pick.pickedMesh);
+      if (pick.pickedMesh.physicsBody) {
+        world.removeBody(pick.pickedMesh.physicsBody);
+      }
+      pick.pickedMesh.dispose();
+    },
+    pointerMove() {},
+    pointerUp() {}
+  };
+
+  ToolBehaviors.SlingShot = {
+    pointerDown() {
+      const s = sounds.slingshot;
+      if (s && s.loaded) try { s.start(); } catch(e) {}
+      spawnProjectile({
+        radius: 1,
+        color: new BABYLON.Color3(0.7,0.7,0.7),
+        life: 10,
+        speed: 80,
+        isBomb: false
+      });
+    },
+    pointerMove() {},
+    pointerUp() {}
+  };
+
+  ToolBehaviors.Bomb = {
+    pointerDown() {
+      const ping = sounds.tool_ping;
+      if (ping && ping.loaded) try { ping.start(); } catch(e) {}
+      startBombTick();
+
+      const pos = new BABYLON.Vector3(
+        rig.position.x,
+        rig.position.y + 1,
+        rig.position.z
+      );
+
+      const mesh = BABYLON.MeshBuilder.CreateSphere("bomb", { diameter: 2 }, scene);
+      const mat = new BABYLON.StandardMaterial("bombMat", scene);
+      mat.diffuseColor = new BABYLON.Color3(0,0,0);
+      mat.specularColor = new BABYLON.Color3(0.1,0.1,0.1);
+      mesh.material = mat;
+      mesh.position.copyFrom(pos);
+
+      const body = new CANNON.Body({
+        mass: 1,
+        material: groundMatPhys
+      });
+      body.addShape(new CANNON.Sphere(1));
+      body.position.set(pos.x, pos.y, pos.z);
+      world.addBody(body);
+
+      const bomb = {
+        mesh,
+        body,
+        life: 10,
+        isBomb: true
+      };
+
+      projectiles.push(bomb);
+    },
+    pointerMove() {},
+    pointerUp() {}
+  };
+
+  let toolPointerDown = false;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    toolPointerDown = true;
+    const pick = getMouseHit();
+    const toolType = currentToolType();
+    const behavior = ToolBehaviors[toolType];
+    if (behavior && behavior.pointerDown) {
+      behavior.pointerDown(pick);
+    }
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    if (e.button !== 0) return;
+    toolPointerDown = false;
+    const toolType = currentToolType();
+    const behavior = ToolBehaviors[toolType];
+    if (behavior && behavior.pointerUp) {
+      behavior.pointerUp();
+    }
+  });
+  canvas.addEventListener("pointermove", () => {
+    if (!toolPointerDown) return;
+    const pick = getMouseHit();
+    const toolType = currentToolType();
+    const behavior = ToolBehaviors[toolType];
+    if (behavior && behavior.pointerMove) {
+      behavior.pointerMove(pick);
+    }
+  });
+
+  scene.onBeforeRenderObservable.add(() => {
+    const dt = engine.getDeltaTime() / 1000;
+    const fixedTimeStep = 1 / 60;
+
+    const forward = new BABYLON.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
+    const right = new BABYLON.Vector3(
+      Math.sin(camYaw + Math.PI / 2),
+      0,
+      Math.cos(camYaw + Math.PI / 2)
+    );
+
+    let move = forward.scale(input.forward).add(right.scale(input.right));
+    const isMoving = move.length() > 0.01;
+    const onGround = playerBody.position.y <= rig.position.y + 0.2;
+
+    const foot = sounds.footsteps;
+    if (isMoving && onGround) {
+      if (foot && foot.loaded && !foot._playing) {
+        try { foot.start(); foot._playing = true; } catch(e) {}
+      }
+    } else {
+      if (foot && foot.loaded && foot._playing) {
+        try { foot.stop(); foot._playing = false; } catch(e) {}
+      }
+    }
+
+    if (isMoving) {
+      move.normalize();
+      rig.position.addInPlace(move.scale(walkSpeed));
+      const targetAngle = Math.atan2(move.x, move.z);
+      model.rotation.y = BABYLON.Scalar.Lerp(model.rotation.y, targetAngle, 0.15);
+    }
+
+    playerBody.position.x = rig.position.x;
+    playerBody.position.z = rig.position.z;
+
+    world.step(fixedTimeStep, dt, 3);
+
+    rig.position.x = playerBody.position.x;
+    rig.position.y = playerBody.position.y - capsuleHeight / 2 + 1;
+    rig.position.z = playerBody.position.z;
+
+    const headPos = new BABYLON.Vector3(
+      rig.position.x,
+      rig.position.y + 3.5,
+      rig.position.z
+    );
+
+    const desiredCamPos = new BABYLON.Vector3(
+      headPos.x + Math.sin(camYaw) * Math.cos(camPitch) * camDistance,
+      headPos.y + Math.sin(camPitch) * camDistance,
+      headPos.z + Math.cos(camYaw) * Math.cos(camPitch) * camDistance
+    );
+
+    camPos = BABYLON.Vector3.Lerp(camPos, desiredCamPos, dt / followTime);
+    camera.position.copyFrom(camPos);
+
+    camTarget = BABYLON.Vector3.Lerp(camTarget, headPos, dt / followTime);
+    camera.setTarget(camTarget);
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      p.life -= dt;
+      p.mesh.position.set(p.body.position.x, p.body.position.y, p.body.position.z);
+      if (p.life <= 0) {
+        if (p.isBomb) {
+          stopBombTick();
+          explodeAt(p.mesh.position.clone(), 10, 40);
+        }
+        world.removeBody(p.body);
+        p.mesh.dispose();
+        projectiles.splice(i, 1);
+      }
+    }
+  });
+
+  // Build parts from EXPORTED_DATA
+  EXPORTED_DATA.parts.forEach((p) => {
+    const mesh = BABYLON.MeshBuilder.CreateBox(p.name || "Part", {
+      width: p.size.x,
+      height: p.size.y,
+      depth: p.size.z
+    }, scene);
+    mesh.position.set(p.position.x, p.position.y, p.position.z);
+    const mat = new BABYLON.StandardMaterial(p.name + "_mat", scene);
+    mat.diffuseColor = new BABYLON.Color3(p.color.r, p.color.g, p.color.b);
+    mat.specularColor = new BABYLON.Color3(0,0,0);
+    mesh.material = mat;
+    mesh.isPickable = true;
+    if (p.draggable && makeDraggableRef) {
+      makeDraggableRef(mesh);
+    }
+  });
+
+  return scene;
+}
+
+const scene = createScene();
+engine.runRenderLoop(() => scene.render());
+window.addEventListener("resize", () => engine.resize());
+<\/script>
+</body>
+</html>`;
+
+    const blob = new Blob([exportedHtml], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "game_export.json";
+    a.download = "exported_game.html";
     a.click();
     URL.revokeObjectURL(url);
   };
+
   /* ============================================================
-     PLAYER PHYSICS BODY
+     PLAYER PHYSICS BODY (EDITOR SIDE)
      ============================================================ */
 
   const capsuleRadius = 0.6;
@@ -453,10 +1220,9 @@ function createScene() {
 
   playerBody.addShape(sphereTop, new CANNON.Vec3(0, cylHeight / 2, 0));
   playerBody.addShape(sphereBottom, new CANNON.Vec3(0, -cylHeight / 2, 0));
-
-  const q = new CANNON.Quaternion();
-  q.setFromEuler(Math.PI / 2, 0, 0);
-  playerBody.addShape(cylinder, new CANNON.Vec3(0, 0, 0), q);
+  const q2 = new CANNON.Quaternion();
+  q2.setFromEuler(Math.PI / 2, 0, 0);
+  playerBody.addShape(cylinder, new CANNON.Vec3(0, 0, 0), q2);
 
   playerBody.position.set(
     rig.position.x,
@@ -468,7 +1234,7 @@ function createScene() {
   world.addBody(playerBody);
 
   /* ============================================================
-     CAMERA + INPUT
+     CAMERA + INPUT (EDITOR SIDE)
      ============================================================ */
 
   let camYaw = Math.PI / 2;
@@ -509,7 +1275,7 @@ function createScene() {
   const followTime = 0.125;
 
   /* ============================================================
-     TOOL SYSTEM
+     TOOL SYSTEM (EDITOR SIDE)
      ============================================================ */
 
   const toolDeclarations = [
@@ -678,6 +1444,7 @@ function createScene() {
 
   function spawnProjectile(opts) {
     const forward = getHeadForward();
+
     const fireDir = forward.scale(-1);
 
     const startPos = rig.position
@@ -712,6 +1479,7 @@ function createScene() {
   }
 
   function explodeAt(position, radius, force) {
+
     const playerDist = BABYLON.Vector3.Distance(
       new BABYLON.Vector3(playerBody.position.x, playerBody.position.y, playerBody.position.z),
       position
@@ -775,10 +1543,6 @@ function createScene() {
 
     setTimeout(() => explosion.dispose(), 300);
   }
-
-  /* ============================================================
-     TOOL BEHAVIORS
-     ============================================================ */
 
   let draggedMesh = null;
   let dragOffset = null;
@@ -861,7 +1625,6 @@ function createScene() {
       }
       pick.pickedMesh.dispose();
 
-      // remove from EditorParts
       const idx = EditorParts.findIndex(p => p.mesh === pick.pickedMesh);
       if (idx !== -1) EditorParts.splice(idx, 1);
     },
@@ -925,10 +1688,6 @@ function createScene() {
     pointerUp() {}
   };
 
-  /* ============================================================
-     POINTER EVENTS
-     ============================================================ */
-
   let toolPointerDown = false;
 
   canvas.addEventListener("pointerdown", (e) => {
@@ -961,10 +1720,6 @@ function createScene() {
       behavior.pointerMove(pick);
     }
   });
-
-  /* ============================================================
-     MAIN UPDATE LOOP
-     ============================================================ */
 
   scene.onBeforeRenderObservable.add(() => {
     const dt = engine.getDeltaTime() / 1000;
@@ -1045,19 +1800,7 @@ function createScene() {
     }
   });
 
-  // initial Explorer refresh
-  (function initialRefresh(){ 
-    const partsListEl = document.getElementById("explorerParts");
-    const toolsListEl = document.getElementById("explorerToolsList");
-    partsListEl.innerHTML = "";
-    EditorParts.forEach((p, i) => {
-      const row = document.createElement("div");
-      row.textContent = p.mesh.name || ("Part_" + i);
-      row.style.padding = "2px 0";
-      partsListEl.appendChild(row);
-    });
-  })();
-
+  refreshExplorer();
   return scene;
 }
 
